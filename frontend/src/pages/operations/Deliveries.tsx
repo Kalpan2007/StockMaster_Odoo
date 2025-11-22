@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Plus, Eye, Check, Package } from 'lucide-react';
 import { useTypedSelector } from '../../hooks/useTypedSelector';
 import { useDispatch } from 'react-redux';
-import { addDelivery, updateDelivery } from '../../store/slices/operationSlice';
+import { addDelivery, updateDelivery, setDeliveries } from '../../store/slices/operationSlice';
+import operationService from '../../services/operationService';
+import warehouseService from '../../services/warehouseService';
 
 export const Deliveries: React.FC = () => {
   const { deliveries } = useTypedSelector((state) => state.operations);
@@ -22,6 +24,41 @@ export const Deliveries: React.FC = () => {
     }
   };
 
+  // Fetch deliveries from backend and populate list
+  useEffect(() => {
+    const fetchDeliveries = async () => {
+      try {
+        const resp = await operationService.getDeliveries();
+        const list = (resp && resp.data) ? resp.data : resp;
+
+        const mapped = (list || []).map((d: any) => {
+          const totalQuantity = (d.items || []).reduce((sum: number, it: any) => sum + (it.quantityDemand || 0), 0);
+          return {
+            id: d._id || d.id,
+            reference: d.reference,
+            customer: d.customer,
+            status: d.status || 'draft',
+            date: d.scheduledDate || d.createdAt || new Date().toISOString(),
+            totalQuantity,
+            items: (d.items || []).map((it: any) => ({
+              id: it._id || it.id || `${d._id || d.id}-${it.product?._id || it.product}`,
+              productId: it.product?._id || it.product,
+              productName: it.product?.name || (products.find(p => p.id === (it.product?._id || it.product))?.name || ''),
+              productSku: it.product?.sku || (products.find(p => p.id === (it.product?._id || it.product))?.sku || ''),
+              quantityDemand: it.quantityDemand || 0,
+              quantityDone: it.quantityDone || 0,
+            })),
+          };
+        });
+
+        dispatch(setDeliveries(mapped));
+      } catch (error: any) {
+        console.error('Failed to fetch deliveries', error);
+      }
+    };
+    fetchDeliveries();
+  }, [dispatch, products]);
+
   const handleValidate = (delivery: any) => {
     const updatedDelivery = { ...delivery, status: 'done' };
     dispatch(updateDelivery(updatedDelivery));
@@ -31,27 +68,80 @@ export const Deliveries: React.FC = () => {
     const [formData, setFormData] = useState({
       customer: '',
       reference: '',
+      warehouse: '',
       date: new Date().toISOString().split('T')[0],
       items: [{ productId: '', quantityDemand: 0, quantityDone: 0 }]
     });
 
-    const handleSubmit = (e: React.FormEvent) => {
-      e.preventDefault();
-      const delivery = {
-        id: Date.now().toString(),
-        ...formData,
-        reference: formData.reference || `DEL-${Date.now().toString().slice(-6)}`,
-        status: 'draft' as const,
-        totalQuantity: formData.items.reduce((sum, item) => sum + item.quantityDemand, 0),
-        items: formData.items.map(item => ({
-          ...item,
-          id: Date.now().toString(),
-          productName: products.find(p => p.id === item.productId)?.name || '',
-          productSku: products.find(p => p.id === item.productId)?.sku || '',
-        }))
+    const [warehouses, setWarehouses] = useState<any[]>([]);
+    const [submitting, setSubmitting] = useState(false);
+
+    useEffect(() => {
+      const fetchWarehouses = async () => {
+        try {
+          const response = await warehouseService.getWarehouses();
+          setWarehouses(response.data?.data || []);
+        } catch (error: any) {
+          console.error('Failed to load warehouses', error);
+        }
       };
-      dispatch(addDelivery(delivery));
-      setShowModal(false);
+      fetchWarehouses();
+    }, []);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!formData.warehouse) {
+        alert('Please select a warehouse');
+        return;
+      }
+
+      try {
+        setSubmitting(true);
+        const payload = {
+          customer: formData.customer,
+          reference: formData.reference || undefined,
+          scheduledDate: formData.date,
+          warehouse: formData.warehouse,
+          items: formData.items.map((item) => ({
+            product: item.productId,
+            quantityDemand: item.quantityDemand,
+          })),
+        };
+
+        const response = await operationService.createDelivery(payload);
+        const created = response?.data;
+
+        if (!created) {
+          throw new Error('No delivery returned from server');
+        }
+
+        // Map backend delivery to local UI shape
+        const totalQuantity = (created.items || []).reduce((sum: number, it: any) => sum + (it.quantityDemand || 0), 0);
+        const mappedDelivery = {
+          id: created._id || Date.now().toString(),
+          customer: created.customer,
+          reference: created.reference || `DEL-${(created._id || Date.now()).toString().slice(-6)}`,
+          date: created.scheduledDate || created.createdAt || formData.date,
+          status: created.status || 'draft',
+          totalQuantity,
+          items: (created.items || []).map((it: any) => ({
+            id: it._id || Date.now().toString(),
+            productId: it.product?._id || it.product,
+            productName: it.product?.name || (products.find(p => p.id === (it.product?._id || it.product))?.name || ''),
+            productSku: it.product?.sku || (products.find(p => p.id === (it.product?._id || it.product))?.sku || ''),
+            quantityDemand: it.quantityDemand || 0,
+            quantityDone: it.quantityDone || 0,
+          })),
+        } as const;
+
+        dispatch(addDelivery(mappedDelivery));
+        setShowModal(false);
+        alert('Delivery created and stored successfully ✅');
+      } catch (error: any) {
+        alert('Error creating delivery: ' + (error.response?.data?.message || error.message));
+      } finally {
+        setSubmitting(false);
+      }
     };
 
     return (
@@ -91,6 +181,21 @@ export const Deliveries: React.FC = () => {
                 required
                 className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Warehouse</label>
+              <select
+                value={formData.warehouse}
+                onChange={(e) => setFormData({ ...formData, warehouse: e.target.value })}
+                required
+                className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              >
+                <option value="">Select Warehouse</option>
+                {warehouses.map((w: any) => (
+                  <option key={w._id} value={w._id}>{w.name}</option>
+                ))}
+              </select>
             </div>
 
             <div>
@@ -147,9 +252,10 @@ export const Deliveries: React.FC = () => {
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-purple-600 hover:bg-purple-700"
+                className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-60"
+                disabled={submitting}
               >
-                Create Delivery
+                {submitting ? 'Creating...' : 'Create Delivery'}
               </button>
             </div>
           </form>

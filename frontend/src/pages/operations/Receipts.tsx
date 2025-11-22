@@ -1,8 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Plus, Eye, CreditCard as Edit, Check } from 'lucide-react';
 import { useTypedSelector } from '../../hooks/useTypedSelector';
 import { useDispatch } from 'react-redux';
-import { addReceipt, updateReceipt } from '../../store/slices/operationSlice';
+import { addReceipt, updateReceipt, setReceipts } from '../../store/slices/operationSlice';
+import operationService from '../../services/operationService';
+import operationService from '../../services/operationService';
+import warehouseService from '../../services/warehouseService';
 
 export const Receipts: React.FC = () => {
   const { receipts } = useTypedSelector((state) => state.operations);
@@ -22,6 +25,42 @@ export const Receipts: React.FC = () => {
     }
   };
 
+  // Fetch receipts from backend and populate list
+  useEffect(() => {
+    const fetchReceipts = async () => {
+      try {
+        const resp = await operationService.getReceipts();
+        const list = (resp && resp.data) ? resp.data : resp; // support both shapes
+
+        const mapped = (list || []).map((r: any) => {
+          const totalQuantity = (r.items || []).reduce((sum: number, it: any) => sum + (it.quantityOrdered || 0), 0);
+          return {
+            id: r._id || r.id,
+            reference: r.reference,
+            supplier: r.supplier,
+            status: r.status || 'draft',
+            date: r.expectedDate || r.createdAt || new Date().toISOString(),
+            totalQuantity,
+            items: (r.items || []).map((it: any) => ({
+              id: it._id || it.id || `${r._id || r.id}-${it.product?._id || it.product}`,
+              productId: it.product?._id || it.product,
+              productName: it.product?.name || (products.find(p => p.id === (it.product?._id || it.product))?.name || ''),
+              productSku: it.product?.sku || (products.find(p => p.id === (it.product?._id || it.product))?.sku || ''),
+              quantityOrdered: it.quantityOrdered || 0,
+              quantityReceived: it.quantityReceived || 0,
+              unitCost: it.unitCost || 0,
+            })),
+          };
+        });
+
+        dispatch(setReceipts(mapped));
+      } catch (error: any) {
+        console.error('Failed to fetch receipts', error);
+      }
+    };
+    fetchReceipts();
+  }, [dispatch, products]);
+
   const handleValidate = (receipt: any) => {
     const updatedReceipt = { ...receipt, status: 'done' };
     dispatch(updateReceipt(updatedReceipt));
@@ -31,27 +70,82 @@ export const Receipts: React.FC = () => {
     const [formData, setFormData] = useState({
       supplier: '',
       reference: '',
+      warehouse: '',
       date: new Date().toISOString().split('T')[0],
       items: [{ productId: '', quantityOrdered: 0, quantityReceived: 0, unitCost: 0 }]
     });
 
-    const handleSubmit = (e: React.FormEvent) => {
-      e.preventDefault();
-      const receipt = {
-        id: Date.now().toString(),
-        ...formData,
-        reference: formData.reference || `RCP-${Date.now().toString().slice(-6)}`,
-        status: 'draft' as const,
-        totalQuantity: formData.items.reduce((sum, item) => sum + item.quantityOrdered, 0),
-        items: formData.items.map(item => ({
-          ...item,
-          id: Date.now().toString(),
-          productName: products.find(p => p.id === item.productId)?.name || '',
-          productSku: products.find(p => p.id === item.productId)?.sku || '',
-        }))
+    const [warehouses, setWarehouses] = useState<any[]>([]);
+    const [submitting, setSubmitting] = useState(false);
+
+    useEffect(() => {
+      const fetchWarehouses = async () => {
+        try {
+          const response = await warehouseService.getWarehouses();
+          setWarehouses(response.data?.data || []);
+        } catch (error: any) {
+          console.error('Failed to load warehouses', error);
+        }
       };
-      dispatch(addReceipt(receipt));
-      setShowModal(false);
+      fetchWarehouses();
+    }, []);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!formData.warehouse) {
+        alert('Please select a warehouse');
+        return;
+      }
+
+      try {
+        setSubmitting(true);
+        const payload = {
+          supplier: formData.supplier,
+          reference: formData.reference || undefined,
+          expectedDate: formData.date,
+          warehouse: formData.warehouse,
+          items: formData.items.map((item) => ({
+            product: item.productId,
+            quantityOrdered: item.quantityOrdered,
+            unitCost: item.unitCost,
+          })),
+        };
+
+        const response = await operationService.createReceipt(payload);
+        const created = response?.data;
+
+        if (!created) {
+          throw new Error('No receipt returned from server');
+        }
+
+        // Map backend receipt to local UI shape
+        const totalQuantity = (created.items || []).reduce((sum: number, it: any) => sum + (it.quantityOrdered || 0), 0);
+        const mappedReceipt = {
+          id: created._id || Date.now().toString(),
+          supplier: created.supplier,
+          reference: created.reference || `RCP-${(created._id || Date.now()).toString().slice(-6)}`,
+          date: created.expectedDate || created.createdAt || formData.date,
+          status: created.status || 'draft',
+          totalQuantity,
+          items: (created.items || []).map((it: any) => ({
+            id: it._id || Date.now().toString(),
+            productId: it.product?._id || it.product,
+            productName: it.product?.name || (products.find(p => p.id === (it.product?._id || it.product))?.name || ''),
+            productSku: it.product?.sku || (products.find(p => p.id === (it.product?._id || it.product))?.sku || ''),
+            quantityOrdered: it.quantityOrdered || 0,
+            quantityReceived: it.quantityReceived || 0,
+            unitCost: it.unitCost || 0,
+          })),
+        } as const;
+
+        dispatch(addReceipt(mappedReceipt));
+        setShowModal(false);
+        alert('Receipt created and stored successfully ✅');
+      } catch (error: any) {
+        alert('Error creating receipt: ' + (error.response?.data?.message || error.message));
+      } finally {
+        setSubmitting(false);
+      }
     };
 
     return (
@@ -91,6 +185,21 @@ export const Receipts: React.FC = () => {
                 required
                 className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Warehouse</label>
+              <select
+                value={formData.warehouse}
+                onChange={(e) => setFormData({ ...formData, warehouse: e.target.value })}
+                required
+                className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              >
+                <option value="">Select Warehouse</option>
+                {warehouses.map((w: any) => (
+                  <option key={w._id} value={w._id}>{w.name}</option>
+                ))}
+              </select>
             </div>
 
             <div>
@@ -159,9 +268,10 @@ export const Receipts: React.FC = () => {
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-purple-600 hover:bg-purple-700"
+                className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-60"
+                disabled={submitting}
               >
-                Create Receipt
+                {submitting ? 'Creating...' : 'Create Receipt'}
               </button>
             </div>
           </form>
