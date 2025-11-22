@@ -5,20 +5,30 @@ import { useDispatch } from 'react-redux';
 import { AppDispatch } from '../../store';
 import { fetchProducts } from '../../store/slices/productSlice';
 import operationService from '../../services/operationService';
+import warehouseService from '../../services/warehouseService';
 
 export const Adjustments: React.FC = () => {
   const dispatch = useDispatch<AppDispatch>();
   const { products } = useTypedSelector((state) => state.products);
-  const { warehouses } = useTypedSelector((state) => state.warehouses);
+  const [warehouses, setWarehouses] = useState<any[]>([]);
 
   const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [adjustments, setAdjustments] = useState<any[]>([]);
   const [formData, setFormData] = useState({
-    productId: '',
-    currentStock: 0,
-    countedQuantity: 0,
+    items: [
+      {
+        productId: '',
+        currentStock: 0,
+        countedQuantity: 0,
+      },
+      {
+        productId: '',
+        currentStock: 0,
+        countedQuantity: 0,
+      },
+    ],
     reason: 'counting_error',
     reasonDescription: '',
     warehouse: '',
@@ -47,16 +57,30 @@ export const Adjustments: React.FC = () => {
         setLoading(false);
       }
     };
+    const fetchWarehouses = async () => {
+      try {
+        const resp = await warehouseService.getWarehouses();
+        const data = resp?.data?.data || resp?.data || [];
+        setWarehouses(data);
+      } catch (e) {
+        // keep local empty; user must select warehouse manually if none fetched
+      }
+    };
     fetchAdjustments();
+    fetchWarehouses();
   }, []);
 
-  const handleProductSelect = (productId: string) => {
+  const handleProductSelect = (index: number, productId: string) => {
     const product = products.find(p => p.id === productId);
     if (product) {
-      setFormData({
-        ...formData,
-        productId,
-        currentStock: product.currentStock,
+      setFormData(prev => {
+        const items = [...prev.items];
+        items[index] = {
+          ...items[index],
+          productId,
+          currentStock: product.currentStock,
+        };
+        return { ...prev, items };
       });
     }
   };
@@ -66,21 +90,39 @@ export const Adjustments: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-      const product = products.find(p => p.id === formData.productId);
-      if (!product) return;
+      // Validate warehouse as ObjectId string
+      const wh = warehouses.find((w: any) => (w._id || w.id) === formData.warehouse);
+      const warehouseId = wh?._id || wh?.id || formData.warehouse;
+
+      // Prepare items (filter out empty rows)
+      const items = formData.items
+        .filter(it => it.productId)
+        .map(it => {
+          const product = products.find(p => p.id === it.productId);
+          const currentStock = product ? product.currentStock : it.currentStock || 0;
+          const countedQuantity = it.countedQuantity || 0;
+          const difference = countedQuantity - currentStock;
+          return {
+            product: it.productId,
+            currentStock,
+            countedQuantity,
+            difference,
+          };
+        });
+
+      if (!warehouseId || !formData.location || items.length === 0) {
+        setError('Please select warehouse, location, and at least one product row');
+        setLoading(false);
+        return;
+      }
 
       const payload = {
-        warehouse: formData.warehouse,
+        reference: `ADJ-${Date.now().toString().slice(-6)}`,
+        warehouse: warehouseId,
         location: formData.location,
         reason: formData.reason,
         reasonDescription: formData.reasonDescription || undefined,
-        items: [
-          {
-            product: formData.productId,
-            currentStock: formData.currentStock,
-            countedQuantity: formData.countedQuantity,
-          },
-        ],
+        items,
       };
 
       const created = await operationService.createAdjustment(payload);
@@ -105,9 +147,10 @@ export const Adjustments: React.FC = () => {
 
       setShowModal(false);
       setFormData({
-        productId: '',
-        currentStock: 0,
-        countedQuantity: 0,
+        items: [
+          { productId: '', currentStock: 0, countedQuantity: 0 },
+          { productId: '', currentStock: 0, countedQuantity: 0 },
+        ],
         reason: 'counting_error',
         reasonDescription: '',
         warehouse: '',
@@ -126,20 +169,46 @@ export const Adjustments: React.FC = () => {
         <h3 className="text-lg font-medium text-gray-900 mb-4">Stock Adjustment</h3>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700">Product</label>
-            <select
-              value={formData.productId}
-              onChange={(e) => handleProductSelect(e.target.value)}
-              required
-              className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
-            >
-              <option value="">Select Product</option>
-              {products.map(product => (
-                <option key={product.id} value={product.id}>
-                  {product.name} ({product.sku}) - Current: {product.currentStock}
-                </option>
+            <label className="block text-sm font-medium text-gray-700">Products</label>
+            <div className="space-y-3">
+              {formData.items.map((item, index) => (
+                <div key={index} className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <select
+                    value={item.productId}
+                    onChange={(e) => handleProductSelect(index, e.target.value)}
+                    className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  >
+                    <option value="">Select Product</option>
+                    {products.map(product => (
+                      <option key={product.id} value={product.id}>
+                        {product.name} ({product.sku}) - Current: {product.currentStock}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    value={item.currentStock}
+                    readOnly
+                    className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 bg-gray-50"
+                    placeholder="Current Stock"
+                  />
+                  <input
+                    type="number"
+                    value={item.countedQuantity}
+                    onChange={(e) => setFormData(prev => {
+                      const items = [...prev.items];
+                      items[index] = {
+                        ...items[index],
+                        countedQuantity: parseInt(e.target.value) || 0,
+                      };
+                      return { ...prev, items };
+                    })}
+                    className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    placeholder="Counted Quantity"
+                  />
+                </div>
               ))}
-            </select>
+            </div>
           </div>
 
           <div>
