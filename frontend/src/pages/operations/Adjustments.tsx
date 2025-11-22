@@ -1,64 +1,54 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Plus, RotateCcw } from 'lucide-react';
 import { useTypedSelector } from '../../hooks/useTypedSelector';
 import { useDispatch } from 'react-redux';
-import { addMovement } from '../../store/slices/operationSlice';
-import { updateProduct } from '../../store/slices/productSlice';
+import { AppDispatch } from '../../store';
+import { fetchProducts } from '../../store/slices/productSlice';
+import operationService from '../../services/operationService';
 
 export const Adjustments: React.FC = () => {
+  const dispatch = useDispatch<AppDispatch>();
   const { products } = useTypedSelector((state) => state.products);
-  const { movements } = useTypedSelector((state) => state.operations);
-  const dispatch = useDispatch();
+  const { warehouses } = useTypedSelector((state) => state.warehouses);
+
   const [showModal, setShowModal] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [adjustments, setAdjustments] = useState<any[]>([]);
   const [formData, setFormData] = useState({
     productId: '',
     currentStock: 0,
     countedQuantity: 0,
-    reason: '',
+    reason: 'counting_error',
+    reasonDescription: '',
+    warehouse: '',
+    location: '',
   });
 
-  const adjustments = movements.filter(m => m.type === 'adjustment');
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const product = products.find(p => p.id === formData.productId);
-    if (!product) return;
-
-    const difference = formData.countedQuantity - formData.currentStock;
-    
-    // Create movement record
-    const movement = {
-      id: Date.now().toString(),
-      type: 'adjustment' as const,
-      productId: formData.productId,
-      productName: product.name,
-      productSku: product.sku,
-      quantity: difference,
-      toLocation: product.location,
-      reference: `ADJ-${Date.now().toString().slice(-6)}`,
-      status: 'done' as const,
-      date: new Date().toISOString(),
-      notes: formData.reason,
+  useEffect(() => {
+    const fetchAdjustments = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const response = await operationService.getAdjustments({ page: 1, limit: 50 });
+        const list = (response.data || []).map((adj: any) => ({
+          id: adj._id,
+          reference: adj.reference,
+          productName: adj.items?.[0]?.product?.name || '—',
+          productSku: adj.items?.[0]?.product?.sku || '—',
+          quantity: adj.items?.[0]?.difference ?? 0,
+          date: adj.adjustmentDate || adj.createdAt,
+          notes: adj.reasonDescription || adj.reason,
+        }));
+        setAdjustments(list);
+      } catch (err: any) {
+        setError(err.message || 'Failed to load adjustments');
+      } finally {
+        setLoading(false);
+      }
     };
-
-    // Update product stock
-    const updatedProduct = {
-      ...product,
-      currentStock: formData.countedQuantity,
-      updatedAt: new Date().toISOString(),
-    };
-
-    dispatch(addMovement(movement));
-    dispatch(updateProduct(updatedProduct));
-    
-    setShowModal(false);
-    setFormData({
-      productId: '',
-      currentStock: 0,
-      countedQuantity: 0,
-      reason: '',
-    });
-  };
+    fetchAdjustments();
+  }, []);
 
   const handleProductSelect = (productId: string) => {
     const product = products.find(p => p.id === productId);
@@ -68,6 +58,65 @@ export const Adjustments: React.FC = () => {
         productId,
         currentStock: product.currentStock,
       });
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setLoading(true);
+      setError(null);
+      const product = products.find(p => p.id === formData.productId);
+      if (!product) return;
+
+      const payload = {
+        warehouse: formData.warehouse,
+        location: formData.location,
+        reason: formData.reason,
+        reasonDescription: formData.reasonDescription || undefined,
+        items: [
+          {
+            product: formData.productId,
+            currentStock: formData.currentStock,
+            countedQuantity: formData.countedQuantity,
+          },
+        ],
+      };
+
+      const created = await operationService.createAdjustment(payload);
+      const createdId = created?.data?._id || created?._id;
+      if (createdId) {
+        await operationService.processAdjustment(createdId, []);
+      }
+
+      // Refresh adjustments and products
+      const response = await operationService.getAdjustments({ page: 1, limit: 50 });
+      const list = (response.data || []).map((adj: any) => ({
+        id: adj._id,
+        reference: adj.reference,
+        productName: adj.items?.[0]?.product?.name || '—',
+        productSku: adj.items?.[0]?.product?.sku || '—',
+        quantity: adj.items?.[0]?.difference ?? 0,
+        date: adj.adjustmentDate || adj.createdAt,
+        notes: adj.reasonDescription || adj.reason,
+      }));
+      setAdjustments(list);
+      dispatch(fetchProducts({}));
+
+      setShowModal(false);
+      setFormData({
+        productId: '',
+        currentStock: 0,
+        countedQuantity: 0,
+        reason: 'counting_error',
+        reasonDescription: '',
+        warehouse: '',
+        location: '',
+      });
+    } catch (err: any) {
+      setError(err.message || 'Failed to create adjustment');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -91,6 +140,33 @@ export const Adjustments: React.FC = () => {
                 </option>
               ))}
             </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Warehouse</label>
+            <select
+              value={formData.warehouse}
+              onChange={(e) => setFormData({ ...formData, warehouse: e.target.value })}
+              required
+              className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+            >
+              <option value="">Select Warehouse</option>
+              {(warehouses as any[]).map((w: any) => (
+                <option key={w._id || w.id} value={w._id || w.id}>{w.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Location</label>
+            <input
+              type="text"
+              value={formData.location}
+              onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+              required
+              className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              placeholder="e.g., Aisle 3 - Shelf B"
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -130,10 +206,27 @@ export const Adjustments: React.FC = () => {
 
           <div>
             <label className="block text-sm font-medium text-gray-700">Reason</label>
-            <textarea
+            <select
               value={formData.reason}
-              onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
+              onChange={(e) => setFormData({ ...formData, reason: e.target.value as any })}
               required
+              className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+            >
+              <option value="counting_error">Counting Error</option>
+              <option value="damaged">Damaged</option>
+              <option value="lost">Lost</option>
+              <option value="found">Found</option>
+              <option value="expired">Expired</option>
+              <option value="theft">Theft</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Notes</label>
+            <textarea
+              value={formData.reasonDescription}
+              onChange={(e) => setFormData({ ...formData, reasonDescription: e.target.value })}
               rows={3}
               className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
               placeholder="Explain the reason for this adjustment..."
@@ -150,9 +243,10 @@ export const Adjustments: React.FC = () => {
             </button>
             <button
               type="submit"
-              className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-purple-600 hover:bg-purple-700"
+              disabled={loading}
+              className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-60"
             >
-              Apply Adjustment
+              {loading ? 'Applying...' : 'Apply Adjustment'}
             </button>
           </div>
         </form>
@@ -196,7 +290,11 @@ export const Adjustments: React.FC = () => {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {adjustments.length > 0 ? (
+              {loading ? (
+                <tr>
+                  <td colSpan={5} className="px-6 py-6 text-center text-sm text-gray-600">Loading adjustments...</td>
+                </tr>
+              ) : adjustments.length > 0 ? (
                 adjustments.map((adjustment) => (
                   <tr key={adjustment.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900">

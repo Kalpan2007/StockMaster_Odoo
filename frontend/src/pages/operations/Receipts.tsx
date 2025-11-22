@@ -24,6 +24,33 @@ export const Receipts: React.FC = () => {
     }
   };
 
+ i  const handleStatusChange = async (id: string, newStatus: 'draft' | 'waiting' | 'ready' | 'done' | 'canceled') => {
+    try {
+      const updated = await operationService.updateReceipt(id, { status: newStatus } as any);
+      const mapped = {
+        id: updated.data?._id || updated._id,
+        reference: updated.data?.reference || updated.reference,
+        supplier: updated.data?.supplier?.name || updated.supplier,
+        status: updated.data?.status || updated.status,
+        date: updated.data?.expectedDate || updated.expectedDate,
+        items: (updated.data?.items || updated.items || []).map((it: any) => ({
+          id: it._id || `${id}-${it.product?._id || it.productId}`,
+          productId: it.product?._id || it.productId,
+          productName: it.product?.name || it.productName,
+          productSku: it.product?.sku || it.productSku,
+          quantityOrdered: it.quantityOrdered,
+          quantityDone: it.quantityDone || 0,
+          unitCost: it.unitCost,
+        })),
+        totalQuantity: (updated.data?.items || updated.items || []).reduce((sum: number, it: any) => sum + (it.quantityOrdered || 0), 0),
+        notes: updated.data?.notes || updated.notes,
+      };
+      dispatch(updateReceipt(mapped as any));
+    } catch (err) {
+      console.error('Failed to update receipt status', err);
+    }
+  };
+
   // Fetch receipts from backend and populate list
   useEffect(() => {
     const fetchReceipts = async () => {
@@ -333,9 +360,23 @@ export const Receipts: React.FC = () => {
                     {receipt.totalQuantity} items
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(receipt.status)}`}>
-                      {receipt.status}
-                    </span>
+                    {receipt.status === 'draft' ? (
+                      <select
+                        value={receipt.status}
+                        onChange={(e) => handleStatusChange(receipt.id, e.target.value as any)}
+                        className="text-xs px-2 py-1 border rounded-md"
+                      >
+                        <option value="draft">draft</option>
+                        <option value="waiting">waiting</option>
+                        <option value="ready">ready</option>
+                        <option value="done">done</option>
+                        <option value="canceled">canceled</option>
+                      </select>
+                    ) : (
+                      <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(receipt.status)}`}>
+                        {receipt.status}
+                      </span>
+                    )}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                     <div className="flex space-x-2">

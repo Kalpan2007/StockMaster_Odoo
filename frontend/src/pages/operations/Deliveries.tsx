@@ -24,6 +24,32 @@ export const Deliveries: React.FC = () => {
     }
   };
 
+  const handleStatusChange = async (id: string, newStatus: 'draft' | 'waiting' | 'ready' | 'done' | 'canceled') => {
+    try {
+      const updated = await operationService.updateDelivery(id, { status: newStatus } as any);
+      const mapped = {
+        id: updated.data?._id || updated._id,
+        reference: updated.data?.reference || updated.reference,
+        customer: updated.data?.customer?.name || updated.customer,
+        status: updated.data?.status || updated.status,
+        date: updated.data?.scheduledDate || updated.scheduledDate,
+        items: (updated.data?.items || updated.items || []).map((it: any) => ({
+          id: it._id || `${id}-${it.product?._id || it.productId}`,
+          productId: it.product?._id || it.productId,
+          productName: it.product?.name || it.productName,
+          productSku: it.product?.sku || it.productSku,
+          quantityDemand: it.quantityDemand,
+          quantityDone: it.quantityDone || 0,
+        })),
+        totalQuantity: (updated.data?.items || updated.items || []).reduce((sum: number, it: any) => sum + (it.quantityDemand || 0), 0),
+        notes: updated.data?.notes || updated.notes,
+      };
+      dispatch(updateDelivery(mapped as any));
+    } catch (err) {
+      console.error('Failed to update delivery status', err);
+    }
+  };
+
   // Fetch deliveries from backend and populate list
   useEffect(() => {
     const fetchDeliveries = async () => {
@@ -318,9 +344,23 @@ export const Deliveries: React.FC = () => {
                     {delivery.totalQuantity} items
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(delivery.status)}`}>
-                      {delivery.status}
-                    </span>
+                    {delivery.status === 'draft' ? (
+                      <select
+                        value={delivery.status}
+                        onChange={(e) => handleStatusChange(delivery.id, e.target.value as any)}
+                        className="text-xs px-2 py-1 border rounded-md"
+                      >
+                        <option value="draft">draft</option>
+                        <option value="waiting">waiting</option>
+                        <option value="ready">ready</option>
+                        <option value="done">done</option>
+                        <option value="canceled">canceled</option>
+                      </select>
+                    ) : (
+                      <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(delivery.status)}`}>
+                        {delivery.status}
+                      </span>
+                    )}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                     <div className="flex space-x-2">
