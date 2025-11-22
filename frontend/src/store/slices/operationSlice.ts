@@ -80,6 +80,9 @@ const operationSlice = createSlice({
     setError: (state, action: PayloadAction<string | null>) => {
       state.error = action.payload;
     },
+    setReceipts: (state, action: PayloadAction<Receipt[]>) => {
+      state.receipts = action.payload;
+    },
     addReceipt: (state, action: PayloadAction<Receipt>) => {
       state.receipts.push(action.payload);
     },
@@ -88,6 +91,9 @@ const operationSlice = createSlice({
       if (index !== -1) {
         state.receipts[index] = action.payload;
       }
+    },
+    setDeliveries: (state, action: PayloadAction<Delivery[]>) => {
+      state.deliveries = action.payload;
     },
     addDelivery: (state, action: PayloadAction<Delivery>) => {
       state.deliveries.push(action.payload);
@@ -107,8 +113,10 @@ const operationSlice = createSlice({
 export const {
   setLoading,
   setError,
+  setReceipts,
   addReceipt,
   updateReceipt,
+  setDeliveries,
   addDelivery,
   updateDelivery,
   addMovement,
