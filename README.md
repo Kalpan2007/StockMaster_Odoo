@@ -126,7 +126,7 @@ flowchart LR
 
   subgraph FRONTEND["Frontend Layer"]
     direction TB
-    A[React 18 + TypeScript]
+    A[React 19 + TypeScript]
     B[Redux Toolkit]
     C[Tailwind CSS]
     D[Socket.IO Client]
@@ -184,9 +184,9 @@ flowchart LR
   class L,M,N,O security;
 ```
 
-<div>
+</div>
 
-
+---
 
 ## 📁 **Project Structure**
 
