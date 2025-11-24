@@ -3,7 +3,7 @@
 # 📦 **StockMaster**
 ### *Next-Generation Inventory Management System with Dynamic data*
 
-[![Live Demo](https://img.shields.io/badge/🚀_Live_Demo-View_Now-success?style=for-the-badge)](https://your-demo-url.com)
+[![Live Demo](https://img.shields.io/badge/🚀_Live_Demo-View_Now-success?style=for-the-badge)](https://youtu.be/0Oq7RwN2Moo?si=y0H5-l_jTdAA14mM)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18+-green.svg?style=for-the-badge&logo=node.js)](https://nodejs.org/)
 [![React](https://img.shields.io/badge/React-18+-blue.svg?style=for-the-badge&logo=react)](https://reactjs.org/)
