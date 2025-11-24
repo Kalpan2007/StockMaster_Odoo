@@ -627,21 +627,6 @@ VITE_APP_NAME=StockMaster
 
 ---
 
-## 🗺️ **Roadmap**
-
-- [ ] 📱 Mobile app (React Native)
-- [ ] 📊 Advanced analytics & forecasting
-- [ ] 🤖 AI-powered demand prediction
-- [ ] 📧 Email notifications
-- [ ] 📱 Barcode scanning support
-- [ ] 🌐 Multi-language support
-- [ ] 📤 Bulk import/export
-- [ ] 🔗 ERP system integration
-- [ ] 📈 Automated reporting
-- [ ] 🔍 Advanced search with AI
-
----
-
 ## 🤝 **Contributing**
 
 We welcome contributions! Here's how you can help:
